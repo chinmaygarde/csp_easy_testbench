@@ -1,0 +1,4 @@
+ruby -v
+rvm gemset create r_2_3_3
+rvm gemset use r_2_3_3
+rake gems:install
