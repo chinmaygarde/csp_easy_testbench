@@ -66,9 +66,8 @@ cross-site scripting, web application security, content security policy, rails
 \IEEEpeerreviewmaketitle
 
 \section{Introduction}
-The increase in XSS and CSRF attacks on websites has necessitated the need for an additional layer of security on websites. Website designers and server administrators need a way to define how content interacts on their websites. CSP is one such content restriction enforcement scheme, the content restrictions rules are activated and enforced by supporting web browsers when a policy is provided for a site via HTTP \cite{IEEEhowto:stamm} . Successful implementation of CSP on the web needs support in two key areas i.e on browsers as well as the web server side. Browsers like Firefox and Chrome already support CSP. Chrome has provided an experimental CSP implementation since version 13 and Firefox 6 and above support CSP. To leverage the use of CSP websites also need to support the requirements of the specification in their deployments.  
+The increase in XSS and CSRF attacks on websites has necessitated the need for an additional layer of security on websites. Website designers and server administrators need a way to define how content interacts on their websites. CSP is one such content restriction enforcement scheme, the content restrictions rules are activated and enforced by supporting web browsers when a policy is provided for a site via HTTP \cite{IEEEhowto:stamm} . Successful implementation of CSP on the web needs support in two key areas i.e on browsers as well as the web server side. Browsers like Firefox and Chrome already support CSP. Chrome has provided an experimental CSP implementation since version 13 and Firefox 6 and above support CSP. To leverage the use of CSP, websites also need to support the requirements of the specification in their deployments. Though CSP is an effective defense against XSS, developers need to adapt to the recommendations of CSP which is not as trivial in practice. CSP stops XSS by blocking inline scripts, it also requires web servers to identify all external scripts and add the respective domains to a whitelist. Leaving the adoption of CSP solely to the developers may not always lead to a correct implementation of all the recommendations of CSP. To reduce the learning curve of developers and also to increase correct adoption, support for CSP is required at the framework level.
 
-\subsection{Our Contribution}
 Rails has been known for having built in XSS prevention features within the frameworks, Frameworks like Rails could further benefit from integrating CSP in their deployments. Rails provides XSS prevention by escaping any user-generated input while displaying the same  in an application,  this can be done as follows:
 
 \begin{lstlisting}
@@ -76,18 +75,57 @@ Rails has been known for having built in XSS prevention features within the fram
 \end{lstlisting}
 
 Using the \emph{"h"} method to escape output in earlier versions of Rails before Rails 3. In Rails 3 output is automatically escaped without the use of the \emph{"h"} method. 
-Other features like html\_safe if used correctly can also be used to verify if a string is safe to be output as HTML. These defenses are however still susceptible to XSS vulnerabilities. The most recent published vulnerability at the time of writing this paper is present in i18n translations helper method in Ruby on Rails 3.0.x before 3.0.11 and 3.1.x before 3.1.2, and the rails\_xss plugin in Ruby on Rails 2.3.x, allows remote attackers to inject arbitrary web script or HTML via vectors related to a translations string whose name ends with an "html" substring \cite{IEEEhowto:cve_rails}. Websites would need to upgrade to Rails to protect against these vulnerability whenever they are disclosed which is not always feasible for a live website and such rollovers may be precarious to say the least.
+Other features like html\_safe if used correctly can also verify if a string is safe to be output as HTML. These defenses are however still susceptible to XSS vulnerabilities. The most recent published vulnerability at the time of writing this paper is present in i18n translations helper method in Ruby on Rails 3.0.x before 3.0.11 and 3.1.x before 3.1.2, and the rails\_xss plugin in Ruby on Rails 2.3.x, allows remote attackers to inject arbitrary web script or HTML via vectors related to a translations string whose name ends with an "html" substring \cite{IEEEhowto:cve_rails}. Websites would need to upgrade to Rails to protect against these vulnerability whenever they are disclosed which is not always feasible for a live website and such rollovers may be precarious to say the least.
 
-In this paper we have implemented a Rail addition called "CSP easy" that automatically generates CSP, abstracting from the website developer the need to understand details of the CSP specification before integration with their website. We also demonstrate the effectiveness of our plugin by testing against known vulnerabilities in the Rails framework.
+In this paper we have implemented a Rail addition called "CSP easy" that automatically generates CSP, abstracting from the website developer the need to understand details of the CSP specification before integration with their website. We also demonstrate the effectiveness of our plugin by testing against known vulnerabilities in the Rails framework. We have also tried to make the use of "CSP easy" as simple as possible, minimizing the need for the developer to learn too many new API and wherever possible tried to abstract the specifications details from the developer.
 
-\subsection{Threat Model}
-In order to point out the vulnerabilities that concerns us in the XSS defenses built in the Rails framework, we will define a threat model that details what an attacker is capable of doing and what are his intentions. Using this threat model, we will be able to evaluate the effect of attacks that exploit vulnerabilities in the Rail framework's XSS defenses. 
+Following are some of the contribution for this paper:
+- Support for CSP specification to Rails, a popular web development framework
+- Evaluation of the effectiveness of our implementation
+- Support at rake middleware layer, facilitating the reuse by other frameworks depend on Rake 
 
-\subsubsection{Attacker Abilities}
+\subsection{Organization}
+In section \ref{sec:weaknesses_of_current_framework} we discuss the weaknesses in current framework and our testbed used to evaluate the framework. Section \ref{sec:our_solution} discusses our Solution which is a Rails addition packaged in the form of a Gem. We discuss the implementation and design of our addition and also the the steps we took to evaluate the same.
+
+\section{Threat Model}
 The primary attacker we would be considering is a web based attacker. A web based attacker has the ability to inject arbitrary web script or HTML. Can send and receive network traffic in his own web servers only. The goal of the attacker is to insert javascript and make it execute with the victim’s privileges so that he can read or modify the target web site state.
 
-\subsubsection{Vulnerability Coverage}
-The current framework supports output escaping by default from Rail 3 onwards. The framework users can achieve a fair amount of security by falling back on framework support and do not need to implement a filter to sanitize output. However, the framework itself  can be susceptible to vulnerabilities as demonstrated in Table \ref{tab:vulnerabilities}.
+We assume that the web attacker can perform Reflected XSS, Stored XSS, and DOM Based XSS \cite{IEEEhowto:owasp}. In Stored XSS attacks, the attacker inject the code such that it is stored on the target server, then at a later time, the victim retrieve this information from the server and the attack code is then executed. In Reflected XSS, the injected code is not stored but reflected from results sent from the server which include part of the input the attacker provided in a request to the server. In DOM Based attacks, the attack code is executed due to change in the DOM because of the user behavior where the attack code is not included in the response sent from the server. 
+
+The following is an example of a Reflected XSS attack: suppose we have a PHP file that displays search results (figure \ref{fig:figure1})
+
+\begin{figure}[hb]
+ \caption{PHP File}
+ \label{fig:figure1}
+ \centering
+ \includegraphics[width=3in]{assets/fig1}
+\end{figure}
+
+\begin{figure}[hb]
+ \caption{Regular Output}
+ \label{fig:figure2}
+ \centering
+ \includegraphics[width=1.5in]{assets/fig2}
+\end{figure}
+
+\begin{figure}[hb]
+ \caption{With XSS}
+ \label{fig:figure3}
+ \centering
+ \includegraphics[width=1.5in]{assets/fig3}
+\end{figure}
+
+If we search for "CMU", we get figure \ref{fig:figure2}
+
+If the attacker request:\\
+http://www.victim.com/\emph{<script>alert("Got JS to execute");</script>}\\
+Then the page will look like figure \ref{fig:figure3} and the Javascript code:\\ \emph{<script>alert("Got JS to execute");</script>} will be executed.
+In order to point out the vulnerabilities that concerns us in the XSS defenses built in the Rails framework, we will define a threat model that details what an attacker is capable of doing and what are his intentions. Using this threat model, we will be able to evaluate the effect of attacks that exploit vulnerabilities in the Rail framework's XSS defenses. 
+
+
+\section{Weaknesses of Current Framework} % (fold)
+\label{sec:weaknesses_of_current_framework}
+The existing framework continues to be vulnerable to various attacks including XSS. These vulnerabilities may be caused by framework users not taking advantage of existing security features. Even though Rails 3 limits the vulnerabilities caused by developer error by providing inbuilt support for output escaping. There have been vulnerabilities within the frameworks implementation itself.The framework users can achieve a fair amount of security by falling back on framework support and do not need to implement a filter to sanitize output. However, the framework itself  can be susceptible to vulnerabilities as demonstrated in Table \ref{tab:vulnerabilities}.
 
 \begin{table}
 \caption{Vulnerabilities Tested}
@@ -133,51 +171,8 @@ CVE-2011-0446
 \end{tabular}
 \end{table}
 
-\subsubsection{Attacker Goals}
-We assume the attacker's goal is to inject arbitrary script into the web application. An attacker will run script for the purpose of information stealing, website defacement, malware planting, clickjacking, etc.
 
-\subsection{Attack Steps}
-We assume that the web attacker can perform Reflected XSS, Stored XSS, and DOM Based XSS \cite{IEEEhowto:owasp}. In Stored XSS attacks, the attacker inject the code such that it is stored on the target server, then at a later time, the victim retrieve this information from the server and the attack code is then executed. In Reflected XSS, the injected code is not stored but reflected from results sent from the server which include part of the input the attacker provided in a request to the server. In DOM Based attacks, the attack code is executed due to change in the DOM because of the user behavior where the attack code is not included in the response sent from the server. 
-
-The following is an example of a Reflected XSS attack: suppose we have a PHP file that displays search results (figure \ref{fig:figure1})
-
-\begin{figure}[hb]
- \caption{PHP File}
- \label{fig:figure1}
- \centering
- \includegraphics[width=3in]{assets/fig1}
-\end{figure}
-
-\begin{figure}[hb]
- \caption{Regular Output}
- \label{fig:figure2}
- \centering
- \includegraphics[width=1.5in]{assets/fig2}
-\end{figure}
-
-\begin{figure}[hb]
- \caption{With XSS}
- \label{fig:figure3}
- \centering
- \includegraphics[width=1.5in]{assets/fig3}
-\end{figure}
-
-If we search for "CMU", we get figure \ref{fig:figure2}
-
-If the attacker request:\\
-http://www.victim.com/\emph{<script>alert("Got JS to execute");</script>}\\
-Then the page will look like figure \ref{fig:figure3} and the Javascript code:\\ \emph{<script>alert("Got JS to execute");</script>} will be executed.
-
-\subsection{Organization}
-In section \ref{sec:weaknesses_of_current_framework} we discuss the weaknesses in current framework and our testbed used to evaluate the framework. Section \ref{sec:our_solution} discusses our Solution which is a Rails addition packaged in the form of a Gem. We discuss the implementation and design of our addition and also the the steps we took to evaluate the same.
-
-\section{Weaknesses of Current Framework} % (fold)
-\label{sec:weaknesses_of_current_framework}
-The existing framework continues to be vulnerable to various attacks including XSS. These vulnerabilities may be caused by framework users not taking advantage of existing security features. Even though Rails 3 limits the vulnerabilities caused by developer error by providing inbuilt support for output escaping. There have been vulnerabilities within the frameworks implementation itself.
 % section weaknesses_of_current_framework (end)
-
-\subsection{Evaluation of Current Rails Framework} % (fold)
-\label{sub:evaluation_of_current_rails_framework}
 
 \subsubsection{Architectural Limitations} % (fold)
 \label{ssub:architectural_limitations}
@@ -227,9 +222,15 @@ The following things had to be kept in mind while building this CSP framework:
 
 \subsection{Approach} % (fold)
 \label{sub:approach}
-An XSS attack by definition works because of execution of malicious Javascript. Hence, we were wary of introducing any defenses in Javascript. All the defenses that are part of our solution are implemented in Ruby.
+An XSS attack by definition works because of execution of malicious Javascript. Many web application frameworks have built in defenses against XSS that can be used be developers. However, developers can male mistakes when using these defenses and open their web applications for XSS vulnerabilities.
 
-Our solution involves the addition of two Ruby Gems to the Gemfile of the Rails project. These Gems are are csp\_easy and csp\_easy\_rails. The csp\_easy Gem consists of Rack middleware that inserts the appropriate CSP policy headers into the HTTP response. The csp\_easy\_rails Gem consists of the utilities and helper methods that are specific to Rails. Using this approach, we felt it would be easy to use the main csp\_easy Gem with any Rack web application framework other than Rails.
+Our solution can be implemented in most of the web application frameworks available. We choose Ruby in Rails (or "Rails") for our familiarity with this framework and because it is known to include built in defenses for XSS which we have proven are still vulnerable.
+
+Rails is a web application development framework written in the Ruby language \cite{IEEEhowto:owasp}. Rails has some helper methods that developers can use to sanitize inputs and protect against injections and XSS. Deploying our solution will modify some of the existing helper methods and provide developers with additional helper methods to make the best use of CSP.
+
+In addition to helper methods, our solution modifies the Rack middleware. Rack provides a minimal, modular and adaptable interface for developing web applications in Ruby. By wrapping HTTP requests and responses, Rack combines the API for web servers, web frameworks, and the middleware into a single method call \cite{IEEEhowto:rorrack}. 
+
+Our solution involves the addition of two Ruby Gems. A gem is a packaged Ruby application or library. It has a name and a version \cite{IEEEhowto:rorgem}. Gems are added to a web application project by adding them to the Gemfile of the Rails project. The Gemfile is file that exist in the root of any Rails application and contains at least one entry for a Ruby gem. Our solution is deployed by adding the csp\_easy and csp\_easy\_rails Gems. The csp\_easy Gem consists of Rack middleware that inserts the appropriate CSP policy headers into the HTTP response. The csp\_easy\_rails Gem consists of the utilities and helper methods that are specific to Rails. Using this approach, we felt it would be easy to use the main csp\_easy Gem with any Rack web application framework other than Rails.
 % subsection approach (end)
 
 \subsection{Implementation} % (fold)
@@ -344,14 +345,22 @@ OWASP. Top 10 2007.  https://www.owasp.org/index.php/Top\_10\_2007
 OWASP. Top 10 2010. https://www.owasp.org/index.php/Top\_10\_2010-Main
 
 \bibitem{IEEEhowto:regex}
-Daniel Bates, Adam Barth, Collin Jackson, \emph{Regular Expressions Considered Harmful in
-Client-Side XSS Filters}. http://www.collinjackson.com/research/xssauditor.pdf
+Daniel Bates, Adam Barth, Collin Jackson, \emph{Regular Expressions Considered Harmful in Client\-Side XSS Filters}. http://www.collinjackson.com/research/xssauditor.pdf
 
 \bibitem{IEEEhowto:sterne}
 Brandon Sterne, Adam Barth, \emph{Content Security Policy, W3C Editor's Draft}. 02 December 2011.
 
+\bibitem{IEEEhowto:rorintro}
+Getting Started with Rails. http://guides.rubyonrails.org/getting\_started.html
+
 \bibitem{IEEEhowto:rorsg}
 Ruby On Rails Security Guide. http://guides.rubyonrails.org/security.html
+
+\bibitem{IEEEhowto:rorgem}
+Introduction to RubyGems. http://docs.rubygems.org/read/chapter/1
+
+\bibitem{IEEEhowto:rorrack}
+ Introduction to Rack. http://guides.rubyonrails.org/rails\_on\_rack.html
 
 \end{thebibliography}
 
